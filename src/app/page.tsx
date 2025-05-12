@@ -1,103 +1,155 @@
-import Image from "next/image";
+"use client"
+import React, { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [roomCode, setRoomCode] = useState('');
+  const [joined, setJoined] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  const SIGNALING_SERVER = 'ws://localhost:3001';
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+      pcRef.current?.close();
+    };
+  }, []);
+
+  const joinRoom = () => {
+    wsRef.current = new WebSocket(SIGNALING_SERVER);
+
+    wsRef.current.onopen = () => {
+      wsRef.current?.send(JSON.stringify({ type: 'join', room: roomCode }));
+      initPeer();
+      setJoined(true);
+      console.log('Joined room:', roomCode);
+    };
+
+    wsRef.current.onmessage = async (message) => {
+      const { type, data } = JSON.parse(message.data);
+
+      if (type === 'signal') {
+        await handleSignal(data);
+      }
+    };
+
+    wsRef.current.onerror = (err) => {
+      console.error('WebSocket error:', err);
+    };
+
+    wsRef.current.onclose = () => {
+      console.log('WebSocket closed');
+    };
+  };
+
+  const handleSignal = async (data: any) => {
+    const pc = pcRef.current;
+    if (!pc) {
+      console.warn("PeerConnection not initialized yet.");
+      return;
+    }
+
+    if (data.sdp) {
+      const desc = new RTCSessionDescription(data.sdp);
+      await pc.setRemoteDescription(desc);
+
+      if (desc.type === 'offer') {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal({ sdp: pc.localDescription });
+      }
+    } else if (data.candidate) {
+      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    }
+  };
+
+  const sendSignal = (data: any) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'signal',
+        room: roomCode,
+        data
+      }));
+    }
+  };
+
+  const initPeer = () => {
+    if (pcRef.current) return; // Prevent re-initialization
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        sendSignal({ candidate: e.candidate });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      console.log('Remote track received', e.streams);
+      const remoteVideo = document.getElementById('remote') as HTMLVideoElement;
+      if (remoteVideo) {
+        remoteVideo.srcObject = e.streams[0];
+      }
+    };
+
+    pcRef.current = pc;
+  };
+
+  const startCall = async () => {
+    initPeer();
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+    // Show local video
+    const localVideo = document.getElementById('local') as HTMLVideoElement;
+    if (localVideo) {
+      localVideo.srcObject = stream;
+    }
+
+    stream.getTracks().forEach((track) => {
+      pcRef.current?.addTrack(track, stream);
+    });
+
+    const offer = await pcRef.current!.createOffer();
+    await pcRef.current!.setLocalDescription(offer);
+    sendSignal({ sdp: offer });
+  };
+
+  return (
+    <main className="flex flex-col items-center justify-center min-h-screen p-8">
+      {!joined ? (
+        <div className="space-y-4">
+          <input
+            className="border p-2"
+            placeholder="Enter room code"
+            value={roomCode}
+            onChange={(e) => setRoomCode(e.target.value)}
+          />
+          <button
+            className="bg-blue-500 text-white px-4 py-2 rounded"
+            onClick={joinRoom}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Join
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      ) : (
+        <div className="space-y-4 w-full flex flex-col items-center">
+          <p className="text-green-600">Joined room: {roomCode}</p>
+          <button
+            className="bg-green-500 text-white px-4 py-2 rounded"
+            onClick={startCall}
+          >
+            Start Call
+          </button>
+          <div className="flex gap-4 w-full justify-center">
+            <video id="local" autoPlay playsInline muted className="w-1/2 rounded border" />
+            <video id="remote" autoPlay playsInline className="w-1/2 rounded border" />
+          </div>
+        </div>
+      )}
+    </main>
   );
 }

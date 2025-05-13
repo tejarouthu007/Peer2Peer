@@ -1,13 +1,16 @@
-"use client"
-import React, { useState, useRef, useEffect } from 'react';
+"use client";
+import React, { useState, useRef, useEffect } from "react";
+import VideoCall from "@/components/VideoCall";
+import ChatBox from "@/components/ChatBox";
+import FileShare from "@/components/FileShare";
 
 export default function Home() {
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState("");
   const [joined, setJoined] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
-  const SIGNALING_SERVER = 'ws://localhost:3001';
+  const SIGNALING_SERVER = "ws://localhost:3001";
 
   useEffect(() => {
     return () => {
@@ -20,7 +23,7 @@ export default function Home() {
     wsRef.current = new WebSocket(SIGNALING_SERVER);
 
     wsRef.current.onopen = () => {
-      wsRef.current?.send(JSON.stringify({ type: 'join', room: roomCode }));
+      wsRef.current?.send(JSON.stringify({ type: "join", room: roomCode }));
       initPeer();
       setJoined(true);
       console.log('Joined room:', roomCode);
@@ -29,32 +32,29 @@ export default function Home() {
     wsRef.current.onmessage = async (message) => {
       const { type, data } = JSON.parse(message.data);
 
-      if (type === 'signal') {
+      if (type === "signal") {
         await handleSignal(data);
       }
     };
 
     wsRef.current.onerror = (err) => {
-      console.error('WebSocket error:', err);
+      console.error("WebSocket error:", err);
     };
 
     wsRef.current.onclose = () => {
-      console.log('WebSocket closed');
+      console.log("WebSocket closed");
     };
   };
 
   const handleSignal = async (data: any) => {
     const pc = pcRef.current;
-    if (!pc) {
-      console.warn("PeerConnection not initialized yet.");
-      return;
-    }
+    if (!pc) return;
 
     if (data.sdp) {
       const desc = new RTCSessionDescription(data.sdp);
       await pc.setRemoteDescription(desc);
 
-      if (desc.type === 'offer') {
+      if (desc.type === "offer") {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         sendSignal({ sdp: pc.localDescription });
@@ -66,19 +66,15 @@ export default function Home() {
 
   const sendSignal = (data: any) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'signal',
-        room: roomCode,
-        data
-      }));
+      wsRef.current.send(JSON.stringify({ type: "signal", room: roomCode, data }));
     }
   };
 
   const initPeer = () => {
-    if (pcRef.current) return; // Prevent re-initialization
+    if (pcRef.current) return;
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     pc.onicecandidate = (e) => {
@@ -88,34 +84,13 @@ export default function Home() {
     };
 
     pc.ontrack = (e) => {
-      console.log('Remote track received', e.streams);
-      const remoteVideo = document.getElementById('remote') as HTMLVideoElement;
+      const remoteVideo = document.getElementById("remote") as HTMLVideoElement;
       if (remoteVideo) {
         remoteVideo.srcObject = e.streams[0];
       }
     };
 
     pcRef.current = pc;
-  };
-
-  const startCall = async () => {
-    initPeer();
-
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-    // Show local video
-    const localVideo = document.getElementById('local') as HTMLVideoElement;
-    if (localVideo) {
-      localVideo.srcObject = stream;
-    }
-
-    stream.getTracks().forEach((track) => {
-      pcRef.current?.addTrack(track, stream);
-    });
-
-    const offer = await pcRef.current!.createOffer();
-    await pcRef.current!.setLocalDescription(offer);
-    sendSignal({ sdp: offer });
   };
 
   return (
@@ -136,19 +111,12 @@ export default function Home() {
           </button>
         </div>
       ) : (
-        <div className="space-y-4 w-full flex flex-col items-center">
-          <p className="text-green-600">Joined room: {roomCode}</p>
-          <button
-            className="bg-green-500 text-white px-4 py-2 rounded"
-            onClick={startCall}
-          >
-            Start Call
-          </button>
-          <div className="flex gap-4 w-full justify-center">
-            <video id="local" autoPlay playsInline muted className="w-1/2 rounded border" />
-            <video id="remote" autoPlay playsInline className="w-1/2 rounded border" />
-          </div>
-        </div>
+        <>
+          <p className="text-green-600 mb-2">Joined room: {roomCode}</p>
+          <VideoCall pcRef={pcRef} sendSignal={sendSignal} />
+          {/* <ChatBox ws={wsRef.current} roomCode={roomCode} />
+          <FileShare ws={wsRef.current} roomCode={roomCode} /> */}
+        </>
       )}
     </main>
   );
